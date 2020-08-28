@@ -1,0 +1,191 @@
+
+---
+title: "GSEA&KEGG"
+author: "Aykhan Yusifov"
+date: "7/30/2020"
+output:
+  html_document: null
+  pdf_document: default
+---
+
+# Load Required R Packages
+
+
+```{r}
+#Install and load required packages
+#BiocManager::install("clusterProfiler", version = "3.8")
+#BiocManager::install("pathview")
+#BiocManager::install("enrichplot")
+library(clusterProfiler)
+library(enrichplot)
+# I use ggplot2 -easy tool for adding details
+library(ggplot2)
+```
+
+
+
+```{r}
+
+# Set my organism
+# Please check from the list and find the organism you need(I am not sure what model you are using)
+organism = "org.Mm.eg.db"
+#BiocManager::install(organism, character.only = TRUE)
+library(organism, character.only = TRUE)
+
+```
+
+
+
+```{r}
+
+# loading the dataset
+df = read.csv("YourData.csv", header=TRUE)
+
+# I want the log fold change 
+original_gene_list <- df$logFC
+
+# name the vector
+names(original_gene_list) <- df$Ensembl
+
+# omit any NA values 
+gene_list<-na.omit(original_gene_list)
+
+# sort the list in decreasing order (required for clusterProfiler)
+gene_list = sort(gene_list, decreasing = TRUE)
+
+
+```
+
+
+#Gene set Enrichment
+# params -keyType This is the source of the annotation (gene ids). The options vary for each annotation. In the example of org.Mm.eg.db, the options are:“ACCNUM” “ALIAS” “ENSEMBL” “ENSEMBLPROT” “ENSEMBLTRANS” “ENTREZID” “ENZYME” “EVIDENCE” “EVIDENCEALL” “FLYBASE” “FLYBASECG” “FLYBASEPROT”“GENENAME” “GO” “GOALL” “MAP” “ONTOLOGY” “ONTOLOGYALL” “PATH” “PMID” “REFSEQ” “SYMBOL” “UNIGENE” “UNIPROT”. Check which options are available with the keytypes command, for example keytypes(org.Mm.eg.db).
+ 
+#ont one of “BP”, “MF”, “CC” or “ALL”
+#nPerm the higher the number of permutations you set, the more accurate your result will, but the longer the analysis will take.
+#minGSSize minimum number of genes in set (gene sets with lower than this many genes in your dataset will be ignored).
+#maxGSSize maximum number of genes in set (gene sets with greater than this many genes in your dataset will be ignored).
+#pvalueCutoff pvalue Cutoff.
+#pAdjustMethod one of “holm”, “hochberg”, “hommel”, “bonferroni”, “BH”, “BY”, “fdr”, “none”
+
+```{r}
+#Here I just use BP for example, for checking others, erase BP add CC or any other you want
+gse <- gseGO(geneList=gene_list, 
+             ont ="BP",
+             keyType = "ENSEMBL", 
+             nPerm = 10000, 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "none")
+
+```
+
+
+#Dotplot
+
+
+```{r, fig.width = 12}
+require(DOSE)
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign) + xlim(0, 1)
+
+
+```
+
+
+#KEGG Gene Set Enrichment Analysis
+
+#For KEGG pathway enrichment using the gseKEGG() function, we need to convert id types. I use the bitr function for this (included in clusterProfiler). 
+
+#bitr function has to be one of the available options from keyTypes(org.Mm.eg.db) and must map to one of ‘kegg’, ‘ncbi-geneid’, ‘ncib-proteinid’ or ‘uniprot’ because gseKEGG() only accepts one of these 4 options as it’s keytype parameter. In the case of org.Dm.eg.db, none of those 4 types are available, but ‘ENTREZID’ are the same as ncbi-geneid for org.Mm.eg.db so we use this for toType.
+
+#As our intial input, we use original_gene_list which we created above.
+
+#Prepare Input
+
+# Convert gene IDs for gseKEGG function, it can get tricky here as your data set gene ids might not be compatible, if you have questions on that, let me know.
+
+# We will lose some genes here because not all IDs will be converted
+
+```{r}
+ids<-bitr(names(original_gene_list), fromType = "ENSEMBL", toType = "ENTREZID", OrgDb=organism)
+# Remove duplicate IDS (here I use "ENSEMBL", but it should be whatever was selected as keyType)
+dedup_ids = ids[!duplicated(ids[c("ENSEMBL")]),]
+```
+
+# Here you can see ENsembl to entrezid correspondance
+```{r}
+dedup_ids
+```
+# To merge and make one list I am giving the same col name
+
+```{r}
+colnames(dedup_ids) <- c("Ensembl", "ENTREZID")
+```
+
+
+#Create a new dataframe df2 which has only the genes which were successfully mapped using the bitr function above and the column for entrezid
+
+```{r}
+df2 = merge (df, dedup_ids, by=c("Ensembl", "Ensembl"))
+
+df2
+```
+
+
+#Create a vector of the gene unuiverse
+
+```{r}
+kegg_gene_list <- df2$logFC
+
+```
+
+#Name vector with ENTREZ ids
+```{r}
+names(kegg_gene_list) <- df2$ENTREZID
+```
+
+
+#omit any NA values 
+```{r}
+kegg_gene_list<-na.omit(kegg_gene_list)
+```
+
+
+#sort the list in decreasing order (required for clusterProfiler)
+```{r}
+kegg_gene_list = sort(kegg_gene_list, decreasing = TRUE)
+```
+
+
+#Create gseKEGG object
+#KEGG Organism Code: The full list is here: https://www.genome.jp/kegg/catalog/org_list.html (need the 3 letter code). I define this as kegg_organism first, because it is used again below when making the pathview plots.
+
+```{r}
+kegg_organism = "mmu"
+
+kk2 <- gseKEGG(geneList     = kegg_gene_list,
+               organism     = kegg_organism,
+               nPerm        = 10000,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+
+```
+
+
+
+#DotPlot
+
+
+```{r, fig.width = 10}
+
+dotplot(kk2, showCategory = 10, title = "Enriched Pathways" , split=".sign") + facet_grid(.~.sign) + scale_x_continuous(limits=c(0,1), labels = scales::number_format(accuracy = 0.2))
+
+
+```
+
